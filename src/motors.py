@@ -42,24 +42,19 @@ class ServoMotor:
         if duty < DUTY_MIN or duty > DUTY_MAX:
             raise ValueError(f"Attempting to write pwm duty value out of range: {duty}")
         self.servo_pwm.duty(duty)
-
-    def write_angle(self, angle: int):
-        """
-        Write a given angle to the motor.
-        
-        params:
-            angle: The angle to write to the motor.
-                   Must be in the range 0 - 180.
-        """
-        
-        if angle < 0 or angle > 180:
-            raise ValueError(f"Attempting to write angle out of range: {angle}")
     
-        if angle == 0:
-            percent = 0.0
-        else:
-            percent = angle / 180
+    def write_fraction(self, fraction: float) -> None:
+        """
+        Write a given fraction of the min - max pwm value to the motor.
 
-        pwm_value = self.min_value + int(percent * (self.max_value - self.min_value))
-        self.write_duty(pwm_value)
+        Params:
+            fraction: The fraction to write to the motor.
+                      Must be in the range 0.0 - 1.0.
+        """
+
+        if fraction < 0.0 or fraction > 1.0:
+            raise ValueError(f"Attempting to write fraction out of range: {fraction}")
+        
+        pwm_value = self.min_value + int(fraction * (self.max_value - self.min_value))
+        self.write_duty(pwm_value) 
 
