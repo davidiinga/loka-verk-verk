@@ -4,6 +4,7 @@ import json
 from asyncio import StreamReader, StreamWriter
 
 from motors import ServoMotor
+from rgbs import RGB_Led
 from mqtt import AsyncMQTT
 
 class AsyncTCP_ServoMotor:
@@ -153,6 +154,90 @@ class MQTT_ServoMotor:
     @property
     def write_topic(self) -> str:
         return f"{self.topic_root}/write"    
+    
+    @property
+    def read_topic(self) -> str:
+        return f"{self.topic_root}/read"
+
+
+class MQTT_RGB_Led:
+    """
+    An RGB LED controlled by an MQTT connection.
+
+    The LED will use the following topics:
+
+        <topic_root>/write
+            This topic is used to write a new color to the LED.
+            Expected payload: a utf-8 encoded json object in the form {"r": [0-255], "g": [0-255], "b": [0-255]}
+            Any colors not provided will hold their current value.
+
+        <topic_root>/read
+            This topic is used to export the current color of the LED.
+            Whenever the LED color changes, it will be published to this topic.
+            Expected payload: a utf-8 encoded json object in the form {"r": [0-255], "g": [0-255], "b": [0-255]}
+    """
+
+    rgb: RGB_Led
+    mqtt: AsyncMQTT
+    topic_root: str
+    current_color: tuple[int, int, int]
+
+    def __init__(self, rgb: RGB_Led, mqtt: AsyncMQTT, topic_root: str):
+        """
+        Initialize a new MQTT_RGB_Led class instance.
+
+        Parameters:
+            rgb (RGB_Led): The RGB LED to control.
+            mqtt (AsyncMQTT): The MQTT client to use.
+            topic_root (str): The root topic to use for this LED.
+        """
+        self.rgb = rgb
+        self.mqtt = mqtt
+        self.topic_root = topic_root
+        self.current_color = (0, 0, 0)
+
+        self.mqtt.subscribe(self.write_topic, self._on_write_packet, 1)
+
+
+    def write(self, color: tuple[int, int, int]):
+        """
+        Write a new color to the LED.
+        If the new color differs from the current color a message will be published to the read topic.
+
+        Parameters:
+            color (tuple[int, int, int]): The new color for the LED.
+        """
+        self.rgb.set_color(color)
+        if color != self.current_color:
+            self.current_color = color
+            self.mqtt.publish(self.read_topic, json.dumps({"r": color[0], "g": color[1], "b": color[2]}).encode("utf-8"), 1)
+
+    def read(self) -> tuple[int, int, int]:
+        """
+        Read the current color of the LED.
+
+        Returns:
+            tuple[int, int, int]: The current color of the LED.
+        """
+        return self.current_color
+    
+    async def _on_write_packet(self, topic: str, message: bytes):
+        """
+        Callback function for the write topic.
+        This function will parse the message and write the new color to the LED. 
+        """
+        message_text = message.decode("utf-8")
+        message_data = json.loads(message_text)
+
+        r = message_data.get("r", self.current_color[0])
+        g = message_data.get("g", self.current_color[1])
+        b = message_data.get("b", self.current_color[2])
+
+        self.write((r, g, b))
+
+    @property
+    def write_topic(self) -> str:
+        return f"{self.topic_root}/write"
     
     @property
     def read_topic(self) -> str:
