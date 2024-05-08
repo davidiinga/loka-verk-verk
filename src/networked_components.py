@@ -2,6 +2,7 @@ import struct
 import asyncio
 import json
 from asyncio import StreamReader, StreamWriter
+from neopixel import NeoPixel
 
 from motors import ServoMotor
 from rgbs import RGB_Led
@@ -242,3 +243,187 @@ class MQTT_RGB_Led:
     @property
     def read_topic(self) -> str:
         return f"{self.topic_root}/read"
+    
+
+class MQTT_Neopixel:
+    """
+    A Neopixel controlled by an MQTT connection.
+
+    The Neopixel will use the following topics:
+
+        <topic_root>/write/list
+            This topic is used to write a new list of colors to the Neopixel.
+            Expected payload: a utf-8 encoded json array of colors in the form [[r, g, b], [r, g, b], ...]
+            The length of the array must match the number of leds in the Neopixel.
+
+        <topic_root>/write/single
+            This topic is used to write a new color to a single led of the Neopixel.
+            Expected payload: a utf-8 encoded json object in the form {"index": [0 - n], "color": [r, g, b]}
+
+        <topic_root>/write/all
+            This topic is used to write a new color to all leds of the Neopixel.
+            Expected payload: a utf-8 encoded json object in the form {"color": [r, g, b]}
+
+        <topic_root>/read
+            This topic is used to export the current colors of the Neopixel.
+            Whenever the Neopixel are written, they will be published to this topic.
+            Expected payload: a utf-8 encoded json array of colors in the form [[r, g, b], [r, g, b], ...]
+    """
+    np: NeoPixel
+    mqtt: AsyncMQTT
+    topic_root: str
+    current_colors: list[tuple[int, int, int]] | None
+    length: int
+
+    def __init__(self, np: NeoPixel, mqtt: AsyncMQTT, topic_root: str):
+        """
+        Initialize a new MQTT_Neopixel class instance.
+
+        Parameters:
+            np (Neopixel): The Neopixel to control.
+            mqtt (AsyncMQTT): The MQTT client to use.
+            topic_root (str): The root topic to use for this Neopixel.
+        """
+        self.np = np
+        self.mqtt = mqtt
+        self.topic_root = topic_root
+        self.current_colors = None
+        self.length = np.n
+
+        self.write_all((0, 0, 0))
+
+        self.mqtt.subscribe(self.write_list_topic, self._on_write_list_packet, 1)
+        self.mqtt.subscribe(self.write_single_topic, self._on_write_single_packet, 1)
+        self.mqtt.subscribe(self.write_all_topic, self._on_write_all_packet, 1)
+
+    def write_list(self, colors: list[tuple[int, int, int]]):
+        """
+        Write a new list of colors to the Neopixel.
+
+        Parameters:
+            colors (list[tuple[int, int, int]]): The new colors for each led of the Neopixel.
+        """
+        if len(colors) != self.length:
+            raise ValueError(f"Attempting to write list of colors with invalid length: {len(colors)} expected: {self.length}")
+
+        for i, color in enumerate(colors):
+            self.np[i] = color
+
+        self.np.write()
+        self.current_colors = colors
+        self.publish_colors()
+
+    def write_single(self, i: int, color: tuple[int, int, int]):
+        """
+        Write a new color to a single led of the Neopixel.
+
+        Parameters:
+            i (int): The index of the led to write to.
+            color (tuple[int, int, int]): The new color for the led.
+        """
+        if i < 0 or i >= self.length:
+            raise ValueError(f"Attempting to write color to invalid led index: {i}, expected: 0 - {self.length - 1}")
+
+        self.np[i] = color
+        self.np.write()
+        self.current_colors[i] = color
+        self.publish_colors()
+
+    def write_all(self, color: tuple[int, int, int]):
+        """
+        Write a new color to all leds of the Neopixel.
+
+        Parameters:
+            color (tuple[int, int, int]): The new color for all leds.
+        """
+        for i in range(self.length):
+            self.np[i] = color
+
+        self.np.write()
+        self.current_colors = [color] * self.length
+        self.publish_colors()
+
+    def read(self) -> list[tuple[int, int, int]]:
+        """
+        Read the current colors of the Neopixel.
+
+        Returns:
+            list[tuple[int, int, int]]: The current colors of the Neopixel.
+        """
+        return self.current_colors or [(0, 0, 0)] * self.length
+
+    def publish_colors(self):
+        """
+        Publish the current colors of the Neopixel to the read topic.
+        """
+        self.mqtt.publish(self.read_topic, json.dumps(self.read()).encode("utf-8"), 1)
+
+    async def _on_write_list_packet(self, topic: str, message: bytes):
+        """
+        Callback function for the write list topic.
+        """
+        message_text = message.decode("utf-8")
+        message_data = json.loads(message_text)
+
+        colors = [self.validate_color(color) for color in message_data]
+        self.write_list(colors)
+
+    async def _on_write_single_packet(self, topic: str, message: bytes):
+        """
+        Callback function for the write single topic.
+        """
+        message_text = message.decode("utf-8")
+        message_data = json.loads(message_text)
+
+        i = message_data.get("index", None)
+        if i is None:
+            print(f"Invalid MQTT_Neopixel write single message missing index: {message_text}")
+            return
+
+        color = self.validate_color(message_data.get("color", (0, 0, 0)))
+        self.write_single(i, color)
+
+    async def _on_write_all_packet(self, topic: str, message: bytes):
+        """
+        Callback function for the write all topic.
+        """
+        message_text = message.decode("utf-8")
+        message_data = json.loads(message_text)
+
+        color = self.validate_color(message_data.get("color", (0, 0, 0)))
+        self.write_all(color)
+
+    @property
+    def write_list_topic(self) -> str:
+        return f"{self.topic_root}/write/list"
+    
+    @property
+    def write_single_topic(self) -> str:
+        return f"{self.topic_root}/write/single"
+    
+    @property
+    def write_all_topic(self) -> str:
+        return f"{self.topic_root}/write/all"
+
+    @property
+    def read_topic(self) -> str:
+        return f"{self.topic_root}/read"
+
+    def validate_color(self, color: tuple[int, int, int]) -> tuple[int, int, int]:
+        """
+        Clean and validate a color tuple.
+        Clamps the values to the range 0 - 255.
+        If the color tuple is invalid, returns (0, 0, 0).
+
+        Parameters:
+            color (tuple[int, int, int]): The color tuple to validate.
+
+        """
+        if len(color) != 3:
+            return (0, 0, 0)
+        
+        return (
+            max(0, min(255, color[0])),
+            max(0, min(255, color[1])),
+            max(0, min(255, color[2]))
+        )
