@@ -143,6 +143,11 @@ class MQTT_ServoMotor:
         Callback function for the write topic.
         This function will parse the message and write the new value to the motor. 
         """
+        
+        value = float(message.decode("utf-8"))
+        self.write(value)
+
+        """
         message_text = message.decode("utf-8")
         message_data = json.loads(message_text)
 
@@ -152,6 +157,7 @@ class MQTT_ServoMotor:
 
         else:
             print(f"Invalid MQTT_ServoMotor message: {message_text}")
+        """
 
     @property
     def write_topic(self) -> str:
