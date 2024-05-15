@@ -18,3 +18,12 @@ Við notum Node Red til að stýra litinn á augonum og hendinni.
 ![IMG_5724](https://github.com/davidiinga/loka-verk-verk/assets/95848480/92a21bdc-0c61-4afd-94e4-979382ae648c)
 .
 ![IMG_5723](https://github.com/davidiinga/loka-verk-verk/assets/95848480/a65e2ed4-7c51-4101-85ec-6f69ea311be9)
+
+
+<h4>Hér ér línk á video um verkefnið:</h4>
+
+https://www.youtube.com/shorts/DUW010kYd-Q
+
+<h4>hér er linkur á kóðan fyrir verkefnið:</h4>
+
+[master_tts](https://github.com/davidiinga/loka-verk-verk/tree/4d5f31fa0b51c1c089363024b47f73569b5abe74/master_tts)
