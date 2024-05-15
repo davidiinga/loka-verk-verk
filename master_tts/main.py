@@ -1,5 +1,3 @@
-"""
-"""
 import asyncio
 
 from espeak import Espeak
@@ -25,3 +23,13 @@ async def main():
     while True:
         await asyncio.sleep(1)
 
+
+async def non_mqtt_main():
+    while True:
+        text = input("Enter text: ")
+        handler.say_text(text)
+
+
+if __name__ == "__main__":
+    # asyncio.run(main())
+    asyncio.run(non_mqtt_main())
