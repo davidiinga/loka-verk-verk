@@ -3,6 +3,7 @@ import asyncio
 import json
 from asyncio import StreamReader, StreamWriter
 from neopixel import NeoPixel
+from machine import I2S, Pin
 
 from motors import ServoMotor
 from rgbs import RGB_Led
@@ -427,3 +428,83 @@ class MQTT_Neopixel:
             max(0, min(255, color[1])),
             max(0, min(255, color[2]))
         )
+
+
+class AsyncTCP_AudioPlayer:
+    """
+    Networked wrapper for the Freenove "Audio Converter & Amplifier" component.
+
+    Communication details:
+        Microntroller - Server
+        Master - Client
+
+        Clients connects to this server.
+        Sends first audio details packet.
+            - Sample Rate        : 4 byte unsigned integer
+            - Number of channels : 4 byte unsigned integer
+            - Bits per sample    : 4 byte unsigned integer
+            - Number of samples  : 4 byte unsigned integer
+            - Packet Size        : 4 byte unsigned integer
+
+        Server responds with an ack packet
+            - 1 byte unsigned integer (0xAD)
+
+        Client sends audio data packets
+            - Samples : <Packet Size> * 2 signed integers
+
+        Server responds with an ack packet
+            - 1 byte unsigned integer (0xAD)
+    """
+    sck_pin: Pin
+    ws_pin: Pin
+    sd_pin: Pin
+
+    host: str
+    port: int
+    server: asyncio.Server
+
+
+    def __init__(self, sck_pin: Pin, ws_pin: Pin, sd_pin: Pin, host: str, port: int):
+        self.host = host
+        self.port = port
+        self.sck_pin = sck_pin
+        self.ws_pin = ws_pin
+        self.sd_pin = sd_pin
+
+    async def start(self):
+        self.server = await asyncio.start_server(self.handle_connection, self.host, self.port)
+
+    async def handle_connection(self, reader: StreamReader, writer: StreamWriter):
+        print("Connection established.")
+
+        # Read audio details packet
+        audio_details = await reader.read(20)
+        sample_rate, num_channels, bits_per_sample, num_samples, packet_size = struct.unpack("IIIII", audio_details)
+
+        i2s = I2S(
+            1,                  
+            sck=self.sck_pin,
+            ws=self.ws_pin,
+            sd=self.sd_pin,
+            mode=I2S.TX,
+            bits=bits_per_sample,
+            format= I2S.MONO if num_channels == 1 else I2S.STEREO,
+            rate=sample_rate,
+            ibuf=4000,
+        )
+
+        # Send ack packet
+        writer.write(struct.pack("B", 0xAD))
+
+        # Audio packet loop
+        samples_read = 0
+        while samples_read < num_samples:
+            audio_packet = await reader.read(packet_size * (bits_per_sample // 8) * num_channels)
+            samples_read += packet_size
+
+            # Send ack packet
+            writer.write(struct.pack("B", 0xAD))
+
+            i2s.write(audio_packet)
+
+
